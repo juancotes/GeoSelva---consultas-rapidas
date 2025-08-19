@@ -1,0 +1,770 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+  <title>GeoSelva: Herramienta de consultas rápidas y actualizadas</title>
+  <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" crossorigin />
+  <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js" crossorigin></script>
+  <script src="https://unpkg.com/esri-leaflet@3.0.11/dist/esri-leaflet.js"></script>
+  <style>
+    :root{
+      --bg:#0b1020; --panel:#111a34; --muted:#7d8fb3; --accent:#60a5fa;
+      --ok:#17c964; --warn:#f5a524; --danger:#ef4444; --border:#1f2a44;
+      --app-h:100dvh;
+      --safe-top: env(safe-area-inset-top, 0px);
+      --safe-bottom: env(safe-area-inset-bottom, 0px);
+      --topbar-h:0px;
+    }
+    html,body{height:100%;margin:0;background:var(--bg);color:#e5e7eb;font-family:system-ui,-apple-system,Segoe UI,Roboto,Inter,Ubuntu,"Helvetica Neue",Arial}
+    *{box-sizing:border-box;-webkit-tap-highlight-color:transparent}
+
+    .desktop-only{display:block}
+    .mobile-only{display:none}
+
+    .app{display:grid;grid-template-columns:360px 1fr 320px;height:var(--app-h);max-height:var(--app-h)}
+    #map{height:var(--app-h);width:100%}
+    .panel{background:var(--panel);border-right:1px solid var(--border);padding:16px;overflow:auto}
+    .panel.right{border-right:none;border-left:1px solid var(--border)}
+    .hdr{display:flex;align-items:center;justify-content:space-between;gap:8px;margin-bottom:12px;position:sticky;top:0;padding-top:var(--safe-top);background:linear-gradient(var(--panel),var(--panel));z-index:2}
+    .hdr h1{font-size:18px;margin:0}
+    .small{font-size:12px;color:var(--muted)}
+    .box{background:#0e1733;border:1px solid var(--border);border-radius:14px;padding:12px;margin-bottom:12px}
+    button,.btn{appearance:none;background:#12224a;border:1px solid var(--border);color:#e5e7eb;padding:10px 12px;border-radius:12px;cursor:pointer;font-size:14px}
+    button:active,.btn:active{transform:scale(.98)}
+    button:hover,.btn:hover{background:#0f1c3d}
+    input[type="text"]{width:100%;padding:12px;border-radius:12px;border:1px solid var(--border);background:#0c1530;color:#e5e7eb;font-size:14px}
+    .swatch{display:inline-block;width:16px;height:16px;border-radius:3px;border:1px solid rgba(255,255,255,.35);vertical-align:middle;margin-right:8px}
+    .layer-item{display:flex;align-items:center;justify-content:space-between;gap:8px;padding:10px;border-radius:12px}
+    .layer-item:hover{background:#0f1c3d}
+    .layer-left{display:flex;align-items:center;gap:10px}
+    .layer-left input[type="checkbox"]{width:20px;height:20px}
+    .layer-right a{color:var(--accent);text-decoration:none}
+    .results{max-height:38vh;overflow:auto;border-top:1px dashed var(--border);padding-top:10px}
+    details{background:#0e1733;border:1px solid var(--border);border-radius:12px;padding:8px 10px;margin:8px 0}
+    details>summary{cursor:pointer;font-weight:600}
+    table{width:100%;border-collapse:collapse;margin-top:6px;font-size:13px}
+    td{border-top:1px dashed var(--border);padding:6px;vertical-align:top}
+    td:first-child{color:#94a3b8;width:40%}
+    .pill{font-size:11px;background:#1b2a52;border:1px solid var(--border);padding:3px 10px;border-radius:999px}
+    .attribution{font-size:11px;color:#94a3b8;margin-top:8px}
+    .suggest{margin-top:8px;max-height:220px;overflow:auto;border:1px solid var(--border);border-radius:12px;background:#0b1430;position:relative}
+    .s-item{padding:10px 12px;cursor:pointer;border-top:1px dashed var(--border);font-size:14px}
+    .s-item:first-child{border-top:none}
+    .s-item:hover{background:#0f1c3d}
+
+    /* FABs */
+    .fabs{position:fixed;left:12px;bottom:calc(12px + var(--safe-bottom));display:none;flex-direction:column;gap:10px;z-index:401}
+    .fab{background:#12224a;border:1px solid var(--border);padding:12px 14px;border-radius:14px;box-shadow:0 6px 20px rgba(0,0,0,.25);font-size:14px}
+
+    /* Sheet inferior (Capas) */
+    .sheet{
+      position:fixed;left:0;right:0;bottom:0;max-height:85vh;background:var(--panel);border-top:1px solid var(--border);
+      border-radius:16px 16px 0 0;box-shadow:0 -12px 30px rgba(0,0,0,.35);
+      transform:translateY(105%);transition:transform .28s ease;z-index:402;touch-action:manipulation
+    }
+    .sheet.open{transform:translateY(0)}
+    .sheet .grab{width:100%;display:flex;justify-content:center;padding-top:6px}
+    .sheet .grab div{width:44px;height:5px;border-radius:999px;background:#1d2a4a;opacity:.9}
+    .sheet .content{padding:10px 14px 14px;max-height:70vh;overflow:auto}
+    .sheet h3{margin:8px 0 10px;font-size:16px}
+    .sheet .sheet-close{position:absolute;right:10px;top:8px;transform:translateY(-50%);background:#15224a;border:1px solid var(--border);border-radius:10px;padding:8px 10px;font-size:14px}
+
+    /* Topbar móvil (buscador arriba) */
+    .topbar{
+      position:fixed;left:0;right:0;top:0;padding:calc(6px + var(--safe-top)) 12px 8px;
+      background:rgba(17,26,52,.96);border-bottom:1px solid var(--border);backdrop-filter:blur(6px);z-index:403
+    }
+    .topbar .row{display:flex;gap:8px}
+    .topbar .row > input{flex:1;min-width:0}
+    .topbar .status{font-size:12px;color:#7d8fb3;margin-top:6px}
+    .topbar .suggest{position:relative;margin-top:8px}
+
+    /* Sheet superior (detalles de resultado) */
+    .sheet-top{
+      position:fixed;left:0;right:0;top:0;max-height:85vh;background:var(--panel);border-bottom:1px solid var(--border);
+      border-radius:0 0 16px 16px;box-shadow:0 12px 30px rgba(0,0,0,.35);
+      transform:translateY(-105%);transition:transform .28s ease;z-index:405
+    }
+    .sheet-top.open{transform:translateY(0)}
+    .sheet-top .grab{width:100%;display:flex;justify-content:center;padding-top:calc(6px + var(--safe-top))}
+    .sheet-top .grab div{width:44px;height:5px;border-radius:999px;background:#1d2a4a;opacity:.9}
+    .sheet-top .content{padding:10px 14px 14px;max-height:70vh;overflow:auto}
+    .sheet-top .sheet-close{position:absolute;right:10px;top:10px;background:#15224a;border:1px solid var(--border);border-radius:10px;padding:8px 10px;font-size:14px}
+
+    /* Toast de resultado (solo móvil) */
+    .result-toast{
+      position:fixed;top:calc(60px + var(--safe-top));left:50%;transform:translateX(-50%);
+      max-width:min(560px,94vw);background:#0e1733;border:1px solid var(--border);border-radius:14px;
+      box-shadow:0 10px 28px rgba(0,0,0,.35);padding:10px 12px;z-index:404;display:none
+    }
+    .result-toast.show{display:block;animation:pop .2s ease}
+    .result-toast h4{margin:0 0 6px;font-size:15px}
+    .chips{display:flex;flex-wrap:wrap;gap:6px;margin:6px 0}
+    .chip{font-size:12px;background:#1b2a52;border:1px solid var(--border);padding:4px 8px;border-radius:999px}
+    .toast-actions{display:flex;gap:8px;justify-content:flex-end;margin-top:6px}
+    @keyframes pop{from{transform:translateX(-50%) scale(.96);opacity:.8}to{transform:translateX(-50%) scale(1);opacity:1}}
+
+    /* Reubicar controles Leaflet en móvil (debajo de topbar) */
+    @media (max-width:980px){
+      .app{grid-template-columns:1fr;grid-template-rows:1fr}
+      .panel{display:none}
+      .fabs{display:flex}
+      .desktop-only{display:none}
+      .mobile-only{display:block}
+      .leaflet-top{top:calc(var(--topbar-h, 0px) + 8px) !important;}
+      .leaflet-right{right:8px}
+      .leaflet-left{left:8px}
+    }
+  </style>
+</head>
+<body>
+<div class="app">
+  <!-- Panel izquierdo (escritorio) -->
+  <aside class="panel desktop-only" aria-label="Búsqueda y resultados">
+    <div class="hdr">
+      <h1>Herramienta de consultas rápidas y actualizadas</h1>
+      <span class="pill">Ecosistema GeoSelva</span>
+    </div>
+
+    <div class="box">
+      <h3 style="margin:0 0 8px">Consulta por dirección o lugar</h3>
+      <input id="searchInput" type="text" placeholder="Pega nombre, dirección o URL de Google Maps" aria-label="Buscar lugar" />
+      <div class="row" style="margin-top:8px">
+        <button id="btnSearch">🔎 Buscar</button>
+        <button id="btnLocate" title="Usar mi ubicación">📍 Ubicarme</button>
+        <button id="btnClear" title="Restablecer vista y capas">↺ Restablecer</button>
+      </div>
+      <div id="suggestions" class="suggest" style="display:none"></div>
+      <div class="small status" id="status" aria-live="polite" style="margin-top:6px">
+        Haz clic en el mapa, busca un lugar o usa tu ubicación para consultar qué capas están presentes allí.
+      </div>
+    </div>
+
+    <div class="box">
+      <h3 style="margin:0 0 8px">Resultado de la consulta</h3>
+      <div class="results" id="results">—</div>
+    </div>
+
+    <div class="small">Base: <a href="https://www.openstreetmap.org/copyright" target="_blank" rel="noopener">© OpenStreetMap</a>. Motor: Esri-Leaflet.</div>
+  </aside>
+
+  <!-- Mapa -->
+  <div id="map" role="application" aria-label="Mapa interactivo"></div>
+
+  <!-- Panel derecho (escritorio) -->
+  <aside class="panel right desktop-only" aria-label="Capas visibles">
+    <div class="hdr">
+      <h2 style="font-size:18px;margin:0">Capas visibles</h2>
+      <span class="pill">Solo en el marco</span>
+    </div>
+    <div class="box">
+      <h3 style="margin:0 0 8px">Mostrar / Ocultar</h3>
+      <div id="layersListRight"></div>
+      <div class="small" id="layersState">Sin capas activas.</div>
+      <div class="attribution">Se dibujan únicamente las entidades dentro del marco de mapa. Transparencias ~35%.</div>
+    </div>
+  </aside>
+</div>
+
+<!-- Topbar móvil -->
+<div class="topbar mobile-only" id="topbar">
+  <div class="row">
+    <input id="mSearchInput" type="text" placeholder="Buscar o pegar URL de Google Maps" aria-label="Buscar lugar (móvil)" />
+    <button id="mBtnSearch" title="Buscar">🔎</button>
+    <button id="mBtnLocate" title="Ubicarme">📍</button>
+    <button id="mBtnClear" title="Restablecer vista y capas">↺</button>
+  </div>
+  <div id="mSuggestions" class="suggest" style="display:none"></div>
+  <div class="status" id="mStatus" aria-live="polite"></div>
+</div>
+
+<!-- Toast móvil (no se usa en desktop) -->
+<div class="result-toast mobile-only" id="resultToast" role="status" aria-live="polite"></div>
+
+<!-- Sheet superior: Detalles (móvil) -->
+<div class="sheet-top mobile-only" id="sheetResultsTop" aria-hidden="true">
+  <button class="sheet-close" id="closeResultsTop" aria-label="Cerrar">✕</button>
+  <div class="grab"><div></div></div>
+  <div class="content">
+    <h3>Resultado de la consulta</h3>
+    <div class="results" id="tResults">—</div>
+  </div>
+</div>
+
+<!-- FABs -->
+<div class="fabs" aria-hidden="false">
+  <button class="fab" id="fabLayers">🗂️ Capas</button>
+</div>
+
+<!-- Sheet inferior: Capas (móvil) -->
+<div class="sheet mobile-only" id="sheetLayers" aria-hidden="true">
+  <button class="sheet-close" id="closeSheetLayers" aria-label="Cerrar">✕</button>
+  <div class="grab"><div></div></div>
+  <div class="content">
+    <h3>Capas visibles</h3>
+    <div id="layersListMobile"></div>
+    <div class="small" id="layersStateMobile" style="margin-top:6px">Sin capas activas.</div>
+    <div class="attribution">Se dibujan únicamente las entidades dentro del marco de mapa. Transparencias ~35%.</div>
+  </div>
+</div>
+
+<!-- MODAL de bienvenida -->
+<div id="welcomeModal" role="dialog" aria-modal="true" aria-labelledby="wmTitle" style="display:none;
+     position:fixed; inset:0; z-index:500; backdrop-filter:blur(2px);">
+  <div style="position:absolute; inset:0; background:rgba(0,0,0,.45)"></div>
+  <div style="position:absolute; left:50%; top:50%; transform:translate(-50%,-50%);
+              width:min(720px,92vw); max-height:85vh; overflow:auto;
+              background:#0e1733; border:1px solid var(--border); border-radius:16px; padding:16px 16px 12px;
+              box-shadow:0 18px 40px rgba(0,0,0,.4);">
+    <div style="display:flex; justify-content:space-between; align-items:center; gap:8px;">
+      <h2 id="wmTitle" style="margin:0; font-size:18px;">Bienvenido/a</h2>
+      <button id="wmClose" class="btn" aria-label="Cerrar">✕</button>
+    </div>
+    <div style="margin-top:10px; font-size:14px; line-height:1.5;">
+      <p>Esta aplicación web te permite consultar, de forma rápida y con información oficial y actualizada, si un lugar se encuentra dentro de una figura de ordenamiento territorial con implicaciones ambientales.</p>
+      <p><strong>Puedes:</strong></p>
+      <ul style="margin:6px 0 10px 18px;">
+        <li>Buscar un punto específico</li>
+        <li>Usar la ubicación de tu dispositivo</li>
+        <li>Explorar directamente en el mapa</li>
+      </ul>
+      <p>Este aplicativo hace parte del ecosistema <strong>GeoSelva</strong>, del Observatorio de la Amazonia de la Universidad del Rosario.</p>
+    </div>
+    <div style="display:flex; justify-content:flex-end; gap:8px; margin-top:8px;">
+      <label style="display:flex; align-items:center; gap:6px; font-size:12px; color:#b6c0d3;">
+        <input type="checkbox" id="wmDontShow" /> No volver a mostrar
+      </label>
+      <button id="wmOk" class="btn">Entendido</button>
+    </div>
+  </div>
+</div>
+
+<script>
+  /* ===== Constantes ===== */
+  const DEFAULT_CENTER = [3.9, -73.1];
+  const DEFAULT_ZOOM = 5;
+
+  /* ===== Alturas y media queries ===== */
+  function setAppHeight(){ document.documentElement.style.setProperty('--app-h', window.innerHeight+'px'); }
+  function setTopbarHeight(){
+    const tb = document.getElementById('topbar');
+    const visible = tb && getComputedStyle(tb).display !== 'none';
+    const h = visible ? tb.offsetHeight : 0;
+    document.documentElement.style.setProperty('--topbar-h', h+'px');
+  }
+  const mqMobile = window.matchMedia('(max-width: 980px)');
+  let isMobile = mqMobile.matches;
+  mqMobile.addEventListener('change', e => { isMobile = e.matches; setTopbarHeight(); positionZoom(); });
+
+  setAppHeight(); setTopbarHeight();
+  addEventListener('resize', ()=>{ setAppHeight(); setTopbarHeight(); });
+  addEventListener('orientationchange', ()=>{ setAppHeight(); setTopbarHeight(); });
+
+  /* ===== Capas ===== */
+  const LAYER_DEFS = [
+    { id:'reserva_forestal', name:'Reserva Forestal Nacional',
+      url:'https://services6.arcgis.com/hxAwRYAu9QHliJ8T/arcgis/rest/services/Reserva_Forestal_Nacional/FeatureServer/8',
+      source:'https://services6.arcgis.com/hxAwRYAu9QHliJ8T/arcgis/rest/services/Reserva_Forestal_Nacional/FeatureServer/8/query?outFields=*&where=1%3D1',
+      color:'#064e3b' },
+    { id:'consejo_comunitario', name:'Consejo Comunitario Titulado',
+      url:'https://utility.arcgis.com/usrsvcs/servers/abf2f9f6727b4073902c1f57c280d5dc/rest/services/DatosAbiertos/Consejo_Comunitario_Titulado/FeatureServer/0',
+      source:'https://utility.arcgis.com/usrsvcs/servers/abf2f9f6727b4073902c1f57c280d5dc/rest/services/DatosAbiertos/Consejo_Comunitario_Titulado/FeatureServer/0/query?outFields=*&where=1%3D1',
+      color:'#ef4444' },
+    { id:'resguardo_indigena', name:'Resguardo Indígena Formalizado',
+      url:'https://utility.arcgis.com/usrsvcs/servers/8944116ccfd34a7189c4bc44b8e19186/rest/services/DatosAbiertos/Resguardo_Indigena_Formalizado/FeatureServer/0',
+      source:'https://utility.arcgis.com/usrsvcs/servers/8944116ccfd34a7189c4bc44b8e19186/rest/services/DatosAbiertos/Resguardo_Indigena_Formalizado/FeatureServer/0/query?outFields=*&where=1%3D1',
+      color:'#f59e0b' },
+    { id:'zrc_constituida', name:'Zonas de Reserva Campesina (Constituida)',
+      url:'https://utility.arcgis.com/usrsvcs/servers/0eca5beb8afe43708622fdd7646cd577/rest/services/DatosAbiertos/Zonas_de_Reserva_Campesina_Constituida/FeatureServer/0',
+      source:'https://utility.arcgis.com/usrsvcs/servers/0eca5beb8afe43708622fdd7646cd577/rest/services/DatosAbiertos/Zonas_de_Reserva_Campesina_Constituida/FeatureServer/0/query?outFields=*&where=1%3D1',
+      color:'#8b5cf6' },
+    { id:'gobernanza_forestal', name:'Gobernanza Forestal',
+      url:'https://services6.arcgis.com/hxAwRYAu9QHliJ8T/arcgis/rest/services/Gobernanza_Forestal/FeatureServer/1',
+      source:'https://services6.arcgis.com/hxAwRYAu9QHliJ8T/arcgis/rest/services/Gobernanza_Forestal/FeatureServer/1/query?outFields=*&where=1%3D1',
+      color:'#f472b6' },
+    { id:'runap_pnn', name:'RUNAP – Parques Nacionales (MapServer/0)',
+      url:'https://mapas.parquesnacionales.gov.co/arcgis/rest/services/pnn/runap/MapServer/0',
+      source:'https://mapas.parquesnacionales.gov.co/arcgis/rest/services/pnn/runap/MapServer/0/query?outFields=*&where=1%3D1',
+      color:'#22c55e' }
+  ];
+
+  /* ===== Mapa y controles ===== */
+  const map = L.map('map', { zoomControl:false, minZoom:3, zoomSnap:.25, tap:true }).setView(DEFAULT_CENTER, DEFAULT_ZOOM);
+  L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', { maxZoom:19, attribution:'&copy; OSM contrib.' }).addTo(map);
+  L.control.scale({imperial:false}).addTo(map);
+
+  let zoomCtrl;
+  function positionZoom(){
+    if (zoomCtrl){ map.removeControl(zoomCtrl); zoomCtrl = null; }
+    zoomCtrl = L.control.zoom({ position: isMobile ? 'topright' : 'topleft' });
+    zoomCtrl.addTo(map);
+  }
+  positionZoom();
+
+  const featureLayers = {};
+  const drawnCounts  = {};
+  const checkboxRefs = {}; // id -> [checkbox, checkbox...]
+
+  const makeStyle = (hex) => ({ color: hex, weight:1.2, fillColor:hex, fillOpacity:.35 });
+
+  function ensureLayer(def){
+    if (featureLayers[def.id]) return featureLayers[def.id];
+    const fl = L.esri.featureLayer({ url:def.url, where:'1=1', style:()=>makeStyle(def.color), precision:5 });
+    fl.on('loading', reportLayerState);
+    fl.on('load', () => { drawnCounts[def.id] = fl.getLayers().length; reportLayerState(); });
+    featureLayers[def.id] = fl;
+    return fl;
+  }
+  function reportLayerState(){
+    const txt = LAYER_DEFS.filter(d => featureLayers[d.id] && map.hasLayer(featureLayers[d.id]))
+      .map(d => `${d.name}: ${drawnCounts[d.id] ?? '…'} ent.`).join(' | ') || 'Sin capas activas.';
+    const el1 = document.getElementById('layersState');
+    const el2 = document.getElementById('layersStateMobile');
+    if (el1) el1.textContent = txt;
+    if (el2) el2.textContent = txt;
+  }
+  function refreshVisibleLayers(){ Object.values(featureLayers).forEach(fl => { if (map.hasLayer(fl)) fl.refresh(); }); }
+  let refreshDebounce;
+  map.on('moveend', () => { clearTimeout(refreshDebounce); refreshDebounce = setTimeout(refreshVisibleLayers,150); });
+
+  /* ===== Listas de capas (desk + móvil) ===== */
+  function addLayerRow(container, def){
+    const row = document.createElement('div'); row.className='layer-item';
+    const left = document.createElement('div'); left.className='layer-left';
+    const checkbox = document.createElement('input'); checkbox.type='checkbox'; checkbox.id=`${container.id}_chk_${def.id}`;
+    (checkboxRefs[def.id] ||= []).push(checkbox);
+    const sw = document.createElement('span'); sw.className='swatch'; sw.style.background=def.color;
+    const label = document.createElement('label'); label.htmlFor=checkbox.id; label.textContent=def.name;
+    left.appendChild(checkbox); left.appendChild(sw); left.appendChild(label);
+
+    const right = document.createElement('div'); right.className='layer-right';
+    const a = document.createElement('a'); a.href=def.source; a.target='_blank'; a.rel='noopener'; a.textContent='Fuente';
+    right.appendChild(a);
+
+    row.appendChild(left); row.appendChild(right); container.appendChild(row);
+
+    checkbox.addEventListener('change', () => {
+      const fl = ensureLayer(def);
+      if (checkbox.checked){ fl.addTo(map); fl.refresh(); }
+      else { drawnCounts[def.id] = 0; map.removeLayer(fl); }
+      // sincroniza todos los checkboxes de esta capa
+      (checkboxRefs[def.id]||[]).forEach(cb => { if (cb !== checkbox) cb.checked = map.hasLayer(fl); });
+      reportLayerState();
+    });
+  }
+  const listRight  = document.getElementById('layersListRight');
+  const listMobile = document.getElementById('layersListMobile');
+  LAYER_DEFS.forEach(def => { if (listRight) addLayerRow(listRight, def); if (listMobile) addLayerRow(listMobile, def); });
+
+  /* ===== Utilidades UI ===== */
+  const statusEls  = [document.getElementById('status'), document.getElementById('mStatus')].filter(Boolean);
+  const resultsEls = [document.getElementById('results'), document.getElementById('tResults')].filter(Boolean);
+  const searchInputs = [document.getElementById('searchInput'), document.getElementById('mSearchInput')].filter(Boolean);
+  const suggestBoxes = [document.getElementById('suggestions'), document.getElementById('mSuggestions')].filter(Boolean);
+
+  function setStatus(msg){ statusEls.forEach(el => el.textContent = msg); }
+  function setResults(html){ resultsEls.forEach(el => el.innerHTML = html); }
+  function hideSuggestions(){ suggestBoxes.forEach(b => { b.style.display='none'; b.innerHTML=''; }); setTopbarHeight(); }
+
+  function placeMarker(latlng){
+    if (window._marker) map.removeLayer(window._marker);
+    window._marker = L.marker(latlng, { draggable:false }).addTo(map);
+    map.setView(latlng, Math.max(map.getZoom(), 12), { animate:true });
+  }
+  function turnOffAllLayers(){
+    LAYER_DEFS.forEach(def => {
+      const fl = featureLayers[def.id];
+      if (fl && map.hasLayer(fl)) map.removeLayer(fl);
+      drawnCounts[def.id] = 0;
+      (checkboxRefs[def.id]||[]).forEach(cb => cb.checked = false);
+    });
+    reportLayerState();
+  }
+
+  // Suprimir el siguiente click del mapa cuando se interactúa con UI sobre el mapa
+  let suppressNextMapClick = false;
+  function stopAll(e){ e.preventDefault(); e.stopPropagation(); suppressNextMapClick = true; setTimeout(()=> suppressNextMapClick = false, 300); }
+
+  function clearAndReset(){
+    if (window._marker) { map.removeLayer(window._marker); window._marker=null; }
+    hideSuggestions();
+    searchInputs.forEach(i => i.value='');
+    setResults('—'); setStatus('Listo. Vista restablecida.');
+    turnOffAllLayers();
+    hideToast();
+    closeTopResults();
+    map.setView(DEFAULT_CENTER, DEFAULT_ZOOM); // ⟵ restablecer encuadre Colombia
+  }
+
+  function syncLayersByHits(hitsById){
+    LAYER_DEFS.forEach(def => {
+      const hits = hitsById[def.id] || 0;
+      const fl = ensureLayer(def);
+      if (hits > 0){
+        if (!map.hasLayer(fl)) { fl.addTo(map); fl.refresh(); }
+      } else {
+        if (map.hasLayer(fl)) map.removeLayer(fl);
+        drawnCounts[def.id] = 0;
+      }
+      // marcar/desmarcar TODOS los checkboxes de esa capa (desktop + móvil)
+      (checkboxRefs[def.id]||[]).forEach(cb => cb.checked = map.hasLayer(fl));
+    });
+    reportLayerState();
+  }
+
+  /* ===== Toast móvil ===== */
+  const toastEl = document.getElementById('resultToast');
+  let toastTimer=null;
+  function showToast(hitsById){
+    if (!isMobile || !toastEl) return; // no mostrar en desktop
+    const chips = Object.entries(hitsById).filter(([_,c])=>c>0).map(([id,c])=>{
+      const d = LAYER_DEFS.find(x=>x.id===id);
+      return `<span class="chip" title="${d?.name||id}">${(d?.name||id)}: ${c}</span>`;
+    }).join('');
+    const any = chips.length>0;
+    toastEl.innerHTML = `
+      <h4>${any ? 'Capas intersectadas en este punto' : 'Sin intersecciones en este punto'}</h4>
+      <div class="chips">${chips || '<span class="small">—</span>'}</div>
+      <div class="toast-actions">
+        ${any ? '<button class="btn" id="btnToastDetails">Detalles</button>' : ''}
+        <button class="btn" id="btnToastClose">Cerrar</button>
+      </div>`;
+    toastEl.classList.add('show');
+
+    clearTimeout(toastTimer);
+    toastTimer = setTimeout(()=> hideToast(), 6000);
+
+    // Evitar que “Cerrar/Detalles” genere click en el mapa
+    const closeBtn = document.getElementById('btnToastClose');
+    const detBtn   = document.getElementById('btnToastDetails');
+    if (closeBtn){ ['click','pointerdown','pointerup'].forEach(ev => closeBtn.addEventListener(ev, stopAll)); closeBtn.addEventListener('click', ()=> hideToast()); }
+    if (detBtn){   ['click','pointerdown','pointerup'].forEach(ev => detBtn.addEventListener(ev, stopAll)); detBtn?.addEventListener('click', ()=> openTopResults()); }
+
+    toastEl.addEventListener('click', e=> e.stopPropagation());
+  }
+  function hideToast(){
+    if (!toastEl) return;
+    clearTimeout(toastTimer); toastTimer=null;
+    toastEl.classList.remove('show');
+  }
+
+  /* ===== Sheet superior de resultados (móvil) ===== */
+  const sheetResultsTop = document.getElementById('sheetResultsTop');
+  const closeResultsTopBtn = document.getElementById('closeResultsTop');
+  function openTopResults(){ if (isMobile && sheetResultsTop){ sheetResultsTop.classList.add('open'); sheetResultsTop.setAttribute('aria-hidden','false'); } }
+  function closeTopResults(){ if (sheetResultsTop){ sheetResultsTop.classList.remove('open'); sheetResultsTop.setAttribute('aria-hidden','true'); } }
+  if (closeResultsTopBtn){ ['click','pointerdown','pointerup'].forEach(ev => closeResultsTopBtn.addEventListener(ev, stopAll)); closeResultsTopBtn.addEventListener('click', ()=> closeTopResults()); }
+
+  // gesto para cerrar
+  (function enableDragClose(sheet){
+    if (!sheet) return;
+    let startY=null, dy=0;
+    sheet.addEventListener('touchstart', e=>{ startY=e.touches[0].clientY; dy=0; }, {passive:true});
+    sheet.addEventListener('touchmove', e=>{
+      if (startY==null) return;
+      dy = startY - e.touches[0].clientY;
+      if (dy<0){ sheet.style.transform=`translateY(${Math.min(Math.abs(dy), sheet.offsetHeight)}px)`; }
+    }, {passive:true});
+    sheet.addEventListener('touchend', ()=>{ if (Math.abs(dy)>60) closeTopResults(); sheet.style.transform=''; startY=null; dy=0; });
+  })(sheetResultsTop);
+
+  /* ===== Consulta de capas ===== */
+  async function queryAllLayers(latlng){
+    try{
+      setStatus('Consultando capas en el punto seleccionado…');
+      setResults('<span class="small">Procesando…</span>');
+
+      const tasks = LAYER_DEFS.map(def => new Promise((resolve) => {
+        const q = L.esri.query({ url: def.url }).where('1=1').intersects(latlng).returnGeometry(false).limit(2000);
+        q.run((err, fc) => {
+          if (err) resolve({ def, error: String(err), features: [] });
+          else resolve({ def, features: (fc && fc.features) ? fc.features : [] });
+        });
+      }));
+
+      const results = await Promise.all(tasks);
+      const hitsById = {}; results.forEach(({def, features}) => hitsById[def.id] = features?.length || 0);
+      syncLayersByHits(hitsById);
+
+      // Detalles
+      const frag = document.createDocumentFragment();
+      let any = false;
+      results.forEach(({def, features, error}) => {
+        if (error){
+          const d = document.createElement('div'); d.innerHTML = `<span class="small">${def.name}: Error al consultar (${error})</span>`;
+          frag.appendChild(d); return;
+        }
+        if (!features || !features.length) return;
+        any = true;
+        const details = document.createElement('details');
+        const count = features.length;
+        details.innerHTML = `<summary>${def.name} <span class="small">(${count} intersección/es)</span> — <a href="${def.source}" target="_blank" rel="noopener" style="color:var(--accent)">ver fuente</a></summary>`;
+        features.forEach((ft, idx) => {
+          const attrs = ft.properties || ft.attributes || {};
+          const tbl = document.createElement('table');
+          Object.keys(attrs).forEach(k => {
+            const tr = document.createElement('tr');
+            const td1 = document.createElement('td'); td1.textContent = k;
+            const td2 = document.createElement('td'); td2.textContent = attrs[k];
+            tr.appendChild(td1); tr.appendChild(td2); tbl.appendChild(tr);
+          });
+          const wrap = document.createElement('div');
+          wrap.innerHTML = `<div class="small" style="margin-top:6px">#${idx+1}</div>`;
+          wrap.appendChild(tbl);
+          details.appendChild(wrap);
+        });
+        frag.appendChild(details);
+      });
+      setResults(''); resultsEls.forEach(el => { el.innerHTML=''; el.appendChild(frag.cloneNode(true)); });
+
+      // Toast (solo móvil)
+      showToast(hitsById);
+
+      if (!any){
+        setResults('<div>No se encontraron capas en este punto.</div>');
+        setStatus('Sin intersecciones en el punto seleccionado.');
+      } else {
+        setStatus('Consulta completada. Capas sincronizadas con coincidencias.');
+      }
+    } catch(err){
+      setResults('<div>Error en la consulta.</div>');
+      setStatus('Error: ' + err.message);
+    }
+  }
+
+  /* ===== Geocodificación OSM (Colombia) ===== */
+  const CO_VIEWBOX = '-79.1,12.6,-66.8,-4.3';
+  async function geocodeOSM(q){
+    const url = `https://nominatim.openstreetmap.org/search?format=jsonv2&q=${encodeURIComponent(q)}&addressdetails=1&limit=8&countrycodes=co&viewbox=${CO_VIEWBOX}&bounded=1`;
+    const res = await fetch(url, { headers:{ 'Accept':'application/json' }});
+    if (!res.ok) throw new Error('Sin respuesta de Nominatim');
+    return res.json();
+  }
+  function showSuggestions(items){
+    if (!items || !items.length){ hideSuggestions(); return; }
+    suggestBoxes.forEach(box => {
+      box.innerHTML = '';
+      items.forEach(it => {
+        const div = document.createElement('div');
+        div.className = 's-item';
+        div.textContent = it.display_name;
+        div.addEventListener('click', () => {
+          hideSuggestions();
+          const latlng = L.latLng(parseFloat(it.lat), parseFloat(it.lon));
+          placeMarker(latlng); queryAllLayers(latlng);
+          if (isMobile) openTopResults();
+        });
+        box.appendChild(div);
+      });
+      box.style.display='block';
+    });
+    setTopbarHeight();
+  }
+
+  /* ===== Parser de URLs de Google Maps ===== */
+  function parseGMapsUrl(input){
+    try{
+      const u = new URL(input);
+      const host = u.hostname;
+      const isGoogle = /(^|\.)google\./i.test(host) || /(^|\.)maps\.google\./i.test(host) || /goo\.gl$/i.test(host) || /maps\.app\.goo\.gl$/i.test(host);
+      if (!isGoogle) return null;
+      const urlStr = input;
+
+      let m = urlStr.match(/@(-?\d+(?:\.\d+)?),(-?\d+(?:\.\d+)?),\d+(?:\.\d+)?z/);
+      if (m) return { lat: parseFloat(m[1]), lon: parseFloat(m[2]) };
+
+      m = urlStr.match(/!3d(-?\d+(?:\.\d+)?)!4d(-?\d+(?:\.\d+)?)/);
+      if (m) return { lat: parseFloat(m[1]), lon: parseFloat(m[2]) };
+      m = urlStr.match(/!4d(-?\d+(?:\.\d+)?)!3d(-?\d+(?:\.\d+)?)/);
+      if (m) return { lat: parseFloat(m[2]), lon: parseFloat(m[1]) };
+
+      const p = u.searchParams;
+      const q = p.get('q') || p.get('query') || p.get('ll') || p.get('center');
+      if (q){
+        const mm = q.trim().match(/^(-?\d+(?:\.\d+)?)[,\s]+(-?\d+(?:\.\d+)?)/);
+        if (mm) return { lat: parseFloat(mm[1]), lon: parseFloat(mm[2]) };
+        return { place: q };
+      }
+      if (/maps\.app\.goo\.gl|goo\.gl\/maps/i.test(urlStr)) return { short:true };
+      return null;
+    }catch(e){ return null; }
+  }
+
+  /* ===== Búsqueda ===== */
+  async function doSearch(getValue){
+    const q = (getValue() || '').trim();
+    if (!q) return;
+
+    if (/^https?:\/\//i.test(q) && /google\.|goo\.gl|maps\.app\.goo\.gl/i.test(q)){
+      const parsed = parseGMapsUrl(q);
+      if (parsed){
+        if (parsed.lat != null && parsed.lon != null){
+          const latlng = L.latLng(parsed.lat, parsed.lon);
+          placeMarker(latlng); queryAllLayers(latlng);
+          setStatus('Coordenadas extraídas del enlace de Google Maps.');
+          hideSuggestions();
+          if (isMobile) openTopResults();
+          return;
+        }
+        if (parsed.place){
+          try{
+            setStatus('Buscando en OSM (desde enlace de Google Maps)…');
+            const items = await geocodeOSM(parsed.place);
+            if (!items.length){ setStatus('Sin resultados en Colombia para ese enlace.'); hideSuggestions(); return; }
+            const first = items[0];
+            const latlng = L.latLng(parseFloat(first.lat), parseFloat(first.lon));
+            placeMarker(latlng); queryAllLayers(latlng);
+            showSuggestions(items);
+            setStatus('Resultado aplicado (OSM).');
+            if (isMobile) openTopResults();
+            return;
+          }catch(err){
+            setStatus('Error de OSM: ' + err.message); hideSuggestions(); return;
+          }
+        }
+        if (parsed.short){
+          setStatus('Ese enlace es un acortador de Google Maps. Abre y copia la URL completa o pega el nombre del lugar.');
+          hideSuggestions();
+          return;
+        }
+      }
+    }
+
+    try{
+      setStatus('Buscando en OSM (Colombia)…');
+      const items = await geocodeOSM(q);
+      if (!items.length){ setStatus('Sin resultados de OSM en Colombia para esa búsqueda.'); hideSuggestions(); return; }
+      const first = items[0];
+      const latlng = L.latLng(parseFloat(first.lat), parseFloat(first.lon));
+      placeMarker(latlng); queryAllLayers(latlng);
+      showSuggestions(items);
+      setStatus('Resultado de OSM aplicado (Colombia).');
+      if (isMobile) openTopResults();
+    }catch(err){
+      setStatus('Error de búsqueda OSM: ' + err.message);
+      hideSuggestions();
+    }
+  }
+
+  /* ===== Eventos ===== */
+  // Desktop
+  const btnSearch   = document.getElementById('btnSearch');
+  const btnLocate   = document.getElementById('btnLocate');
+  const btnClear    = document.getElementById('btnClear');
+  const searchInput = document.getElementById('searchInput');
+
+  btnSearch?.addEventListener('click', () => doSearch(() => searchInput.value));
+  searchInput?.addEventListener('keydown', (e)=>{ if (e.key === 'Enter') doSearch(() => searchInput.value); });
+  btnLocate?.addEventListener('click', () => {
+    if (!navigator.geolocation){ setStatus('Geolocalización no soportada por tu navegador.'); return; }
+    setStatus('Obteniendo tu ubicación…');
+    navigator.geolocation.getCurrentPosition(pos => {
+      const latlng = L.latLng(pos.coords.latitude, pos.coords.longitude);
+      placeMarker(latlng); queryAllLayers(latlng);
+      if (isMobile) openTopResults();
+    }, err => { setStatus('No se pudo obtener ubicación: ' + err.message); },
+       { enableHighAccuracy:true, timeout:10000, maximumAge:0 });
+  });
+  btnClear?.addEventListener('click', clearAndReset);
+
+  // Móvil
+  const mBtnSearch   = document.getElementById('mBtnSearch');
+  const mBtnLocate   = document.getElementById('mBtnLocate');
+  const mBtnClear    = document.getElementById('mBtnClear');
+  const mSearchInput = document.getElementById('mSearchInput');
+
+  mBtnSearch?.addEventListener('click', () => doSearch(() => mSearchInput.value));
+  mSearchInput?.addEventListener('keydown', (e)=>{ if (e.key === 'Enter') doSearch(() => mSearchInput.value); });
+  mBtnLocate?.addEventListener('click', () => {
+    if (!navigator.geolocation){ setStatus('Geolocalización no soportada por tu navegador.'); return; }
+    setStatus('Obteniendo tu ubicación…');
+    navigator.geolocation.getCurrentPosition(pos => {
+      const latlng = L.latLng(pos.coords.latitude, pos.coords.longitude);
+      placeMarker(latlng); queryAllLayers(latlng);
+      if (isMobile) openTopResults();
+    }, err => { setStatus('No se pudo obtener ubicación: ' + err.message); },
+       { enableHighAccuracy:true, timeout:10000, maximumAge:0 });
+  });
+  mBtnClear?.addEventListener('click', clearAndReset);
+
+  // Click en el mapa (ignora si venimos de un botón de UI)
+  map.on('click', (e) => { if (suppressNextMapClick) return; placeMarker(e.latlng); queryAllLayers(e.latlng); });
+
+  // FAB Capas (móvil)
+  const sheetLayers = document.getElementById('sheetLayers');
+  const fabLayers   = document.getElementById('fabLayers');
+  const closeSheetLayersBtn = document.getElementById('closeSheetLayers');
+  function openSheet(el){ el.classList.add('open'); el.setAttribute('aria-hidden','false'); }
+  function closeSheet(el){ el.classList.remove('open'); el.setAttribute('aria-hidden','true'); }
+  fabLayers?.addEventListener('click', (e) => { stopAll(e); openSheet(sheetLayers); });
+  if (closeSheetLayersBtn){ ['click','pointerdown','pointerup'].forEach(ev => closeSheetLayersBtn.addEventListener(ev, stopAll)); closeSheetLayersBtn.addEventListener('click', ()=> closeSheet(sheetLayers)); }
+
+  // Cerrar sheet inferior arrastrando
+  (function enableDragClose(sheet){
+    if (!sheet) return;
+    let startY=null, dy=0;
+    sheet.addEventListener('touchstart', e=>{ startY = e.touches[0].clientY; dy=0; }, {passive:true});
+    sheet.addEventListener('touchmove', e=>{
+      if (startY==null) return;
+      dy = e.touches[0].clientY - startY;
+      if (dy>0){ sheet.style.transform = `translateY(${Math.min(dy, sheet.offsetHeight)}px)`; }
+    }, {passive:true});
+    sheet.addEventListener('touchend', ()=>{ if (dy>60) closeSheet(sheet); sheet.style.transform=''; startY=null; dy=0; });
+  })(sheetLayers);
+
+  // Re-sync checkboxes cuando cambian capas desde código
+  function resyncCheckboxes(){
+    LAYER_DEFS.forEach(def => {
+      const fl = featureLayers[def.id];
+      const checked = fl && map.hasLayer(fl);
+      (checkboxRefs[def.id]||[]).forEach(cb => cb.checked = checked);
+    });
+    reportLayerState();
+  }
+  map.on('layeradd', resyncCheckboxes);
+  map.on('layerremove', resyncCheckboxes);
+
+  // Cerrar sugerencias si se toca fuera
+  document.addEventListener('click', (e)=>{
+    const ids = new Set(['searchInput','mSearchInput','suggestions','mSuggestions']);
+    if (!ids.has(e.target.id) && !e.target.closest?.('.suggest')) hideSuggestions();
+  });
+
+  // Sugerencias con debounce
+  let suggestTimer=null;
+  searchInputs.forEach(inp => {
+    inp.addEventListener('input', ()=>{
+      const q = inp.value.trim();
+      clearTimeout(suggestTimer);
+      if (q.length < 3){ hideSuggestions(); return; }
+      suggestTimer = setTimeout(async ()=>{
+        try{ const items = await geocodeOSM(q); showSuggestions(items); }catch{}
+      }, 350);
+    });
+  });
+
+  /* ===== Modal de bienvenida ===== */
+  const wm = document.getElementById('welcomeModal');
+  const wmOk = document.getElementById('wmOk');
+  const wmClose = document.getElementById('wmClose');
+  const wmDont = document.getElementById('wmDontShow');
+  function maybeShowWelcome(){
+    try{
+      const seen = localStorage.getItem('geoselva_welcome_v1') === '1';
+      if (!seen){ wm.style.display = 'block'; }
+    }catch{ wm.style.display='block'; }
+  }
+  function closeWelcome(save){
+    wm.style.display='none';
+    if (save){ try{ localStorage.setItem('geoselva_welcome_v1','1'); }catch{} }
+  }
+  wmOk?.addEventListener('click', ()=> closeWelcome(wmDont?.checked));
+  wmClose?.addEventListener('click', ()=> closeWelcome(wmDont?.checked));
+  wm?.addEventListener('click', (e)=>{ if (e.target === wm) closeWelcome(wmDont?.checked); });
+
+  // Mostrar modal al cargar
+  maybeShowWelcome();
+</script>
+</body>
+</html>
